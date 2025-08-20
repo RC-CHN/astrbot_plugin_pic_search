@@ -41,9 +41,9 @@ class PicSearch(Star):
         return self.context.llm
 
     @filter.command("搜图", ["picsearch"])
-    async def handle_pic_search(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int] = None):
+    async def handle_pic_search(self, event: AstrMessageEvent, query: str, description: str, count: Optional[int] = None):
         logger.info("--- EXECUTING COMMAND HANDLER: handle_pic_search ---")
-        async for result in self._do_pic_search(event, query, prompt, count):
+        async for result in self._do_pic_search(event, query, description, count):
             yield result
     @filter.llm_tool(name="pic_search")
     async def pic_search_tool(self, event: AstrMessageEvent, query: str, description: str, count: int = 64):
@@ -96,7 +96,7 @@ class PicSearch(Star):
             return "处理过程中发生严重错误，详情请查看日志。"
 
 
-    async def _do_pic_search(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int]):
+    async def _do_pic_search(self, event: AstrMessageEvent, query: str, description: str, count: Optional[int]):
         total_count = count if count is not None else self.default_scrape_count
 
         vlm_provider = self._get_vlm_provider()
@@ -104,7 +104,7 @@ class PicSearch(Star):
             yield event.plain_result("无法获取有效的VLM Provider，请检查插件配置或当前会话的LLM设置。")
             return
 
-        yield event.plain_result(f"收到任务！\n- 搜索: {query}\n- 要求: {prompt}\n- 数量: {total_count}\n正在后台处理，请稍候...")
+        yield event.plain_result(f"收到任务！\n- 搜索: {query}\n- 要求: {description}\n- 数量: {total_count}\n正在后台处理，请稍候...")
 
         try:
             # 1. Scrape image URLs
@@ -116,7 +116,7 @@ class PicSearch(Star):
             logger.info(f"PicSearch: 成功抓取 {len(image_urls)} 个链接。开始进行淘汰赛筛选...")
 
             # 2. Run the tournament process
-            winner_url = await self._process_in_batches(image_urls, prompt, vlm_provider)
+            winner_url = await self._process_in_batches(image_urls, description, vlm_provider)
             if not winner_url:
                 yield event.plain_result("筛选过程没有产生最终结果，任务终止。")
                 return
@@ -135,7 +135,7 @@ class PicSearch(Star):
             logger.error(f"PicSearch: An unexpected error occurred in main handler: {e}", exc_info=True)
             yield event.plain_result("处理过程中发生严重错误，详情请查看日志。")
 
-    async def _process_in_batches(self, image_urls: list, prompt: str, vlm_provider: Provider) -> Optional[str]:
+    async def _process_in_batches(self, image_urls: list, description: str, vlm_provider: Provider) -> Optional[str]:
         """The core tournament-style selection process. Logs progress instead of replying."""
         current_winners = image_urls
         round_num = 1
@@ -145,7 +145,7 @@ class PicSearch(Star):
             next_round_winners = []
             
             # Determine the prompt for this round
-            effective_prompt = prompt
+            effective_prompt = description
             prompt_enhancements = []
 
             # Final round logic: if 16 or fewer candidates, activate stricter prompt
@@ -164,7 +164,7 @@ class PicSearch(Star):
                 )
             
             if prompt_enhancements:
-                effective_prompt = f"{prompt}\n\n{' '.join(prompt_enhancements)}"
+                effective_prompt = f"{description}\n\n{' '.join(prompt_enhancements)}"
 
             for i in range(0, len(current_winners), self.batch_size):
                 batch_urls = current_winners[i:i + self.batch_size]

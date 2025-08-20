@@ -6,6 +6,7 @@ to ensure reliable pagination cookie handling.
 """
 import asyncio
 import json
+import time
 from typing import List
 import random
 
@@ -74,7 +75,7 @@ def _scrape_images_sync(query: str, count: int) -> List[str]:
                     break
                 
                 # Be polite and wait a bit before the next request
-                asyncio.run(asyncio.sleep(random.uniform(0.5, 1.5)))
+                time.sleep(random.uniform(0.5, 1.5))
 
             except requests.exceptions.RequestException as e:
                 logger.error(f"PicSearch Scraper: An error occurred during the web request: {e}")

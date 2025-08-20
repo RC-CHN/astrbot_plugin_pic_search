@@ -79,7 +79,7 @@ async def select_from_collage(image_bytes: bytes, prompt: str, vlm_provider: Pro
             return [int(n) for n in numbers]
  
         except Exception as e:
-            logger.warning(f"PicSearch VLM: Attempt {attempt + 1}/{retries} failed: {e}")
+            logger.warning(f"PicSearch VLM: Attempt {attempt + 1}/{retries} failed: {e}", exc_info=True)
             if attempt < retries - 1:
                 await asyncio.sleep(2)
     

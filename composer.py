@@ -55,47 +55,44 @@ async def _download_image(url: str, retries: int = 2) -> Optional[bytes]:
     return None
 
 
-async def create_collage(image_urls: List[str]) -> (Optional[bytes], List[str]):
+def _get_font(size: int) -> ImageFont.FreeTypeFont:
+    """Attempts to load a preferred font, with fallbacks."""
+    font_names = ["Arial.ttf", "msyh.ttc", "simsun.ttc"] # Common on Win/some Linux
+    for font_name in font_names:
+        try:
+            return ImageFont.truetype(font_name, size)
+        except IOError:
+            continue
+    logger.warning("PicSearch Composer: Could not find preferred fonts. Falling back to default.")
+    return ImageFont.load_default()
+
+def _create_collage_sync(image_bytes_list: List[bytes], original_urls: List[str]) -> (Optional[bytes], List[str]):
     """
-    Asynchronously downloads images and creates a collage with enhanced robustness.
-
-    Args:
-        image_urls (List[str]): A list of URLs to download.
-
-    Returns:
-        A tuple containing:
-        - bytes: The collage image in PNG format.
-        - List[str]: A list of URLs that were successfully downloaded and included.
+    Synchronous function to create a collage from image bytes.
+    Designed to be run in an executor to avoid blocking the event loop.
     """
-    tasks = [_download_image(url) for url in image_urls]
-    results = await asyncio.gather(*tasks)
-
     successful_images, successful_urls = [], []
     tile_size = 256
-    for i, img_bytes in enumerate(results):
+    for i, img_bytes in enumerate(image_bytes_list):
         if img_bytes:
             try:
-                # Pillow operations are synchronous but fast enough for this context.
                 img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
                 img = img.resize((tile_size, tile_size), Image.Resampling.LANCZOS)
                 successful_images.append(img)
-                successful_urls.append(image_urls[i])
+                successful_urls.append(original_urls[i])
             except (IOError, UnidentifiedImageError) as e:
-                logger.warning(f"PicSearch Composer: Skipping image from {image_urls[i]} due to processing error: {e}")
+                logger.warning(f"PicSearch Composer: Skipping image from {original_urls[i]} due to processing error: {e}")
                 continue
 
     if not successful_images:
-        logger.error("PicSearch Composer: No images could be successfully downloaded or processed for the collage.")
+        logger.error("PicSearch Composer: No images could be successfully processed for the collage.")
         return None, []
 
     columns = 4
     rows = math.ceil(len(successful_images) / columns)
     collage = Image.new('RGB', (columns * tile_size, rows * tile_size), (255, 255, 255))
     draw = ImageDraw.Draw(collage)
-    try:
-        font = ImageFont.truetype("arial.ttf", 24)
-    except IOError:
-        font = ImageFont.load_default()
+    font = _get_font(24)
 
     for i, img in enumerate(successful_images):
         row, col = i // columns, i % columns
@@ -111,3 +108,30 @@ async def create_collage(image_urls: List[str]) -> (Optional[bytes], List[str]):
     buffer = io.BytesIO()
     collage.save(buffer, format="PNG")
     return buffer.getvalue(), successful_urls
+
+async def create_collage(image_urls: List[str]) -> (Optional[bytes], List[str]):
+    """
+    Asynchronously downloads images and creates a collage using a non-blocking executor
+    for image processing.
+    """
+    tasks = [_download_image(url) for url in image_urls]
+    results = await asyncio.gather(*tasks)
+
+    # Filter out failed downloads
+    successful_downloads = [(img_bytes, url) for img_bytes, url in zip(results, image_urls) if img_bytes]
+    if not successful_downloads:
+        logger.error("PicSearch Composer: No images could be successfully downloaded for the collage.")
+        return None, []
+        
+    image_bytes_list, original_urls = zip(*successful_downloads)
+
+    loop = asyncio.get_running_loop()
+    # Run the CPU-bound image processing in a thread pool executor
+    collage_bytes, successful_urls = await loop.run_in_executor(
+        None,
+        _create_collage_sync,
+        list(image_bytes_list),
+        list(original_urls)
+    )
+    
+    return collage_bytes, successful_urls
