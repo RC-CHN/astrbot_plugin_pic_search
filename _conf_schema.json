@@ -1,0 +1,20 @@
+{
+  "vlm_provider_id": {
+    "type": "string",
+    "title": "VLM Provider ID",
+    "description": "用于图片理解（VLM）的 Provider 的唯一 ID。如果留空，将使用当前会话默认的 LLM Provider。",
+    "default": ""
+  },
+  "batch_size": {
+    "type": "int",
+    "title": "Batch Size",
+    "description": "在每一轮淘汰赛中，单批次处理的图片数量。较大的值会更快，但会消耗更多 Token。",
+    "default": 16
+  },
+  "default_scrape_count": {
+    "type": "int",
+    "title": "Default Scrape Count",
+    "description": "当用户在命令中不指定数量时，默认从 Bing 抓取的图片数量。",
+    "default": 64
+  }
+}
