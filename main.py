@@ -44,16 +44,51 @@ class PicSearch(Star):
         async for result in self._do_pic_search(event, query, prompt, count):
             yield result
     @filter.llm_tool(name="pic_search")
-    async def pic_search_tool(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int] = 64):
+    async def pic_search_tool(self, event: AstrMessageEvent, query: str, description: str, count: int = 64):
         '''根据关键词和描述在网络上搜索一张最匹配的图片。
 
         Args:
             query(string): 用于初步搜索图片的通用关键词，例如“猫”或“东京街景”。
-            prompt(string): 对期望图片的具体、详细的视觉描述，用于从初选图片中进行智能筛选，例如“一只戴着帽子的黑猫”或“雨夜的涩谷街头，霓虹灯闪烁”。
+            description(string): 对期望图片的具体、详细的视觉描述，用于从初选图片中进行智能筛选，例如“一只戴着帽子的黑猫”或“雨夜的涩谷街头，霓虹灯闪烁”。
             count(number): 初始抓取的图片数量，用于扩大筛选范围。这是一个可选参数，默认是64，不建议更小，但过大会增加带宽压力，建议为16的倍数。
         '''
-        async for result in self._do_pic_search(event, query, prompt, count):
-            yield result
+        # LLM Tool implementation
+        total_count = count
+
+        vlm_provider = self._get_vlm_provider()
+        if not vlm_provider:
+            return "无法获取有效的VLM Provider，请检查插件配置或当前会话的LLM设置。"
+
+        # Notify user that the process has started
+        await event.send_message(f"收到任务！\n- 搜索: {query}\n- 要求: {description}\n- 数量: {total_count}\n正在后台处理，请稍候...")
+
+        try:
+            # 1. Scrape image URLs
+            image_urls = await scrape_image_urls(query, total_count)
+            if not image_urls:
+                return "未能抓取到任何图片链接，任务终止。"
+
+            logger.info(f"PicSearch: 成功抓取 {len(image_urls)} 个链接。开始进行淘汰赛筛选...")
+
+            # 2. Run the tournament process
+            winner_url = await self._process_in_batches(image_urls, description, vlm_provider)
+            if not winner_url:
+                return "筛选过程没有产生最终结果，任务终止。"
+
+            # 3. Download and send the final image
+            final_image_bytes = await _download_image(winner_url)
+            if final_image_bytes:
+                # Send image directly
+                result_image = Comp.Image.fromBytes(final_image_bytes)
+                await event.send_message(result_image)
+                # Return text summary to LLM
+                return "已成功为用户找到并发送了图片。"
+            else:
+                return f"无法下载最终图片，链接为：{winner_url}"
+
+        except Exception as e:
+            logger.error(f"PicSearch: An unexpected error occurred in tool handler: {e}", exc_info=True)
+            return "处理过程中发生严重错误，详情请查看日志。"
 
 
     async def _do_pic_search(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int]):
