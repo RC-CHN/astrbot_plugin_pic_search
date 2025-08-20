@@ -106,13 +106,25 @@ class PicSearch(Star):
             
             # Determine the prompt for this round
             effective_prompt = prompt
+            prompt_enhancements = []
+
+            # Final round logic: if 16 or fewer candidates, activate stricter prompt
+            if len(current_winners) <= 16:
+                logger.info(f"PicSearch: Entering final round with {len(current_winners)} candidates. Activating stricter prompt.")
+                prompt_enhancements.append(
+                    "重要指示：你正处于决赛圈。请对以下图片进行严格比较，并只选出其中最符合描述的一半（向上取整）作为优胜者。如果所有图片都同样优秀，也请务必只选择一半。"
+                )
+
+            # Stalemate logic
             if stalemate_counter > 0:
                 logger.warning(f"PicSearch: Activating enhanced prompt due to stalemate (counter: {stalemate_counter}).")
-                effective_prompt = (
-                    f"{prompt}\n\n"
+                prompt_enhancements.append(
                     "重要指示: 你必须进行筛选。请从以上图片中，严格挑选出一张或几张最符合描述的图片。"
                     "如果所有图片都符合，请只选择最优秀的一张。"
                 )
+            
+            if prompt_enhancements:
+                effective_prompt = f"{prompt}\n\n{' '.join(prompt_enhancements)}"
 
             for i in range(0, len(current_winners), self.batch_size):
                 batch_urls = current_winners[i:i + self.batch_size]

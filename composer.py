@@ -6,6 +6,7 @@ import asyncio
 import io
 import math
 import random
+import ssl
 from typing import List, Optional
 
 import aiohttp
@@ -20,19 +21,32 @@ USER_AGENTS = [
 DEFAULT_HEADERS = {'User-Agent': random.choice(USER_AGENTS)}
 
 
-async def _download_image(url: str, retries: int = 3) -> Optional[bytes]:
+async def _download_image(url: str, retries: int = 2) -> Optional[bytes]:
     """Asynchronously downloads a single image with retries."""
     last_exception = None
+    # Create an SSL context that does not verify certificates
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
     for attempt in range(retries):
         try:
             # Set a reasonable timeout for each attempt
             timeout = aiohttp.ClientTimeout(total=15, connect=5, sock_read=10)
-            async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout, connector=connector) as session:
                 async with session.get(url) as resp:
                     resp.raise_for_status()
                     return await resp.read()
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             last_exception = e
+            if isinstance(e, aiohttp.ClientResponseError) and e.status in [403, 404]:
+                logger.error(f"Download failed with permanent error {e.status} for {url}, skipping retries.")
+                return None
+            if isinstance(e, aiohttp.ClientSSLError):
+                logger.error(f"Download failed with SSL error for {url}, skipping retries: {e}")
+                return None
+            
             logger.warning(f"PicSearch Composer: Download attempt {attempt + 1}/{retries} failed for {url}: {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(1)  # Wait before retrying
