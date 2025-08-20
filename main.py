@@ -41,7 +41,22 @@ class PicSearch(Star):
 
     @filter.command("搜图", ["picsearch"])
     async def handle_pic_search(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int] = None):
-        
+        async for result in self._do_pic_search(event, query, prompt, count):
+            yield result
+    @filter.llm_tool(name="pic_search")
+    async def pic_search_tool(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int] = 64):
+        '''根据关键词和描述在网络上搜索一张最匹配的图片。
+
+        Args:
+            query(string): 用于初步搜索图片的通用关键词，例如“猫”或“东京街景”。
+            prompt(string): 对期望图片的具体、详细的视觉描述，用于从初选图片中进行智能筛选，例如“一只戴着帽子的黑猫”或“雨夜的涩谷街头，霓虹灯闪烁”。
+            count(number): 初始抓取的图片数量，用于扩大筛选范围。这是一个可选参数，默认是64，不建议更小，但过大会增加带宽压力，建议为16的倍数。
+        '''
+        async for result in self._do_pic_search(event, query, prompt, count):
+            yield result
+
+
+    async def _do_pic_search(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int]):
         total_count = count if count is not None else self.default_scrape_count
 
         vlm_provider = self._get_vlm_provider()

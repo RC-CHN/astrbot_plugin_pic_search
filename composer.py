@@ -9,7 +9,9 @@ import random
 from typing import List, Optional
 
 import aiohttp
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+
+from astrbot.api import logger
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -18,21 +20,30 @@ USER_AGENTS = [
 DEFAULT_HEADERS = {'User-Agent': random.choice(USER_AGENTS)}
 
 
-async def _download_image(url: str) -> Optional[bytes]:
-    """Asynchronously downloads a single image."""
-    try:
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
-            async with session.get(url) as resp:
-                resp.raise_for_status()
-                return await resp.read()
-    except (aiohttp.ClientError, asyncio.TimeoutError):
-        return None
+async def _download_image(url: str, retries: int = 3) -> Optional[bytes]:
+    """Asynchronously downloads a single image with retries."""
+    last_exception = None
+    for attempt in range(retries):
+        try:
+            # Set a reasonable timeout for each attempt
+            timeout = aiohttp.ClientTimeout(total=15, connect=5, sock_read=10)
+            async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    resp.raise_for_status()
+                    return await resp.read()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            last_exception = e
+            logger.warning(f"PicSearch Composer: Download attempt {attempt + 1}/{retries} failed for {url}: {e}")
+            if attempt < retries - 1:
+                await asyncio.sleep(1)  # Wait before retrying
+    
+    logger.error(f"PicSearch Composer: All {retries} download attempts failed for {url}. Last error: {last_exception}")
+    return None
 
 
 async def create_collage(image_urls: List[str]) -> (Optional[bytes], List[str]):
     """
-    Asynchronously downloads images and creates a collage.
+    Asynchronously downloads images and creates a collage with enhanced robustness.
 
     Args:
         image_urls (List[str]): A list of URLs to download.
@@ -55,10 +66,12 @@ async def create_collage(image_urls: List[str]) -> (Optional[bytes], List[str]):
                 img = img.resize((tile_size, tile_size), Image.Resampling.LANCZOS)
                 successful_images.append(img)
                 successful_urls.append(image_urls[i])
-            except Exception:  # Ignore images that fail to process
+            except (IOError, UnidentifiedImageError) as e:
+                logger.warning(f"PicSearch Composer: Skipping image from {image_urls[i]} due to processing error: {e}")
                 continue
 
     if not successful_images:
+        logger.error("PicSearch Composer: No images could be successfully downloaded or processed for the collage.")
         return None, []
 
     columns = 4
@@ -77,7 +90,7 @@ async def create_collage(image_urls: List[str]) -> (Optional[bytes], List[str]):
         
         label = str(i + 1)
         # Simple label background
-        bg_box = [x_offset + 5, y_offset + 5, x_offset + 28, y_offset + 28]
+        bg_box = [x_offset + 5, y_offset + 5, x_offset + 30, y_offset + 30]
         draw.rectangle(bg_box, fill="black")
         draw.text((x_offset + 8, y_offset + 8), label, fill="white", font=font)
 
