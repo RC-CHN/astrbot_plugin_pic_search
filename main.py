@@ -5,6 +5,7 @@ PicSearch Plugin for AstrBot (Main Entry)
 This file contains the main plugin logic, command handling, and coordination
 of the scraper, composer, and VLM modules.
 """
+import random
 from typing import Optional
 
 import astrbot.core.message.components as Comp
@@ -83,9 +84,21 @@ class PicSearch(Star):
         """The core tournament-style selection process. Logs progress instead of replying."""
         current_winners = image_urls
         round_num = 1
+        stalemate_counter = 0
         while len(current_winners) > 1:
             logger.info(f"PicSearch: --- 第 {round_num} 轮淘汰赛开始，当前选手: {len(current_winners)} 名 ---")
             next_round_winners = []
+            
+            # Determine the prompt for this round
+            effective_prompt = prompt
+            if stalemate_counter > 0:
+                logger.warning(f"PicSearch: Activating enhanced prompt due to stalemate (counter: {stalemate_counter}).")
+                effective_prompt = (
+                    f"{prompt}\n\n"
+                    "重要指示: 你必须进行筛选。请从以上图片中，严格挑选出一张或几张最符合描述的图片。"
+                    "如果所有图片都符合，请只选择最优秀的一张。"
+                )
+
             for i in range(0, len(current_winners), self.batch_size):
                 batch_urls = current_winners[i:i + self.batch_size]
                 if not batch_urls: continue
@@ -99,7 +112,7 @@ class PicSearch(Star):
 
                 logger.info("PicSearch: 拼接图已生成，正在提交给VLM进行筛选...")
 
-                selected_indices = await select_from_collage(collage_bytes, prompt, vlm_provider)
+                selected_indices = await select_from_collage(collage_bytes, effective_prompt, vlm_provider)
                 if not selected_indices:
                     logger.warning("PicSearch: VLM未能从本批次中选出任何图片。")
                     continue
@@ -117,8 +130,21 @@ class PicSearch(Star):
             if not next_round_winners:
                 logger.error("PicSearch: Tournament round produced no winners.")
                 return None
+
+            previous_winner_count = len(current_winners)
+            current_winners = list(set(next_round_winners))
             
-            current_winners = list(set(next_round_winners))  # Remove duplicates
+            if len(current_winners) == previous_winner_count and len(current_winners) > 1:
+                stalemate_counter += 1
+                logger.warning(f"PicSearch: Stalemate detected (Round {round_num}). Count: {len(current_winners)}. Counter: {stalemate_counter}")
+            else:
+                stalemate_counter = 0
+
+            if stalemate_counter >= 2:
+                logger.error("PicSearch: Stalemate persists after prompt modification. Forcing a random choice.")
+                current_winners = [random.choice(current_winners)]
+                break
+            
             round_num += 1
 
         return current_winners[0] if current_winners else None
