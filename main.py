@@ -65,7 +65,7 @@ class PicSearch(Star):
             return "无法获取有效的VLM Provider，请检查插件配置或当前会话的LLM设置。"
 
         # Notify user that the process has started
-        await event.send(MessageChain([Plain(f"收到任务！\n- 搜索: {query}\n- 要求: {description}\n- 数量: {total_count}\n正在后台处理，请稍候...")]))
+        # await event.send(MessageChain([Plain(f"收到任务！\n- 搜索: {query}\n- 要求: {description}\n- 数量: {total_count}\n正在后台处理，请稍候...")]))
 
         try:
             # 1. Scrape image URLs
