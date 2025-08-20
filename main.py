@@ -10,7 +10,8 @@ from typing import Optional
 
 import astrbot.core.message.components as Comp
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, filter, MessageChain
+from astrbot.api.message_components import Plain
 from astrbot.api.provider import Provider
 from astrbot.api.star import Star, Context, register
 
@@ -41,17 +42,21 @@ class PicSearch(Star):
 
     @filter.command("搜图", ["picsearch"])
     async def handle_pic_search(self, event: AstrMessageEvent, query: str, prompt: str, count: Optional[int] = None):
+        logger.info("--- EXECUTING COMMAND HANDLER: handle_pic_search ---")
         async for result in self._do_pic_search(event, query, prompt, count):
             yield result
     @filter.llm_tool(name="pic_search")
     async def pic_search_tool(self, event: AstrMessageEvent, query: str, description: str, count: int = 64):
         '''根据关键词和描述在网络上搜索一张最匹配的图片。
 
+        本工具首先会根据通用关键词（query）抓取大量图片，然后利用视觉语言模型（VLM）根据你的详细描述（description）进行智能筛选，最终返回最符合要求的一张。
+        
         Args:
-            query(string): 用于初步搜索图片的通用关键词，例如“猫”或“东京街景”。
-            description(string): 对期望图片的具体、详细的视觉描述，用于从初选图片中进行智能筛选，例如“一只戴着帽子的黑猫”或“雨夜的涩谷街头，霓虹灯闪烁”。
+            query(string): **必需参数**。用于初步搜索图片的通用关键词，例如“猫”或“东京街景”。
+            description(string): **必需参数**。对期望图片的具体、详细的视觉描述。**如果用户输入模糊，你必须根据 query 和上下文自行生成一个合理的、具体的视觉描述**，例如“一只戴着帽子的黑猫”或“雨夜的涩谷街头，霓虹灯闪烁”。
             count(number): 初始抓取的图片数量，用于扩大筛选范围。这是一个可选参数，默认是64，不建议更小，但过大会增加带宽压力，建议为16的倍数。
         '''
+        logger.info("--- EXECUTING LLM TOOL: pic_search_tool ---")
         # LLM Tool implementation
         total_count = count
 
@@ -60,7 +65,7 @@ class PicSearch(Star):
             return "无法获取有效的VLM Provider，请检查插件配置或当前会话的LLM设置。"
 
         # Notify user that the process has started
-        await event.send_message(f"收到任务！\n- 搜索: {query}\n- 要求: {description}\n- 数量: {total_count}\n正在后台处理，请稍候...")
+        await event.send(MessageChain([Plain(f"收到任务！\n- 搜索: {query}\n- 要求: {description}\n- 数量: {total_count}\n正在后台处理，请稍候...")]))
 
         try:
             # 1. Scrape image URLs
@@ -80,7 +85,7 @@ class PicSearch(Star):
             if final_image_bytes:
                 # Send image directly
                 result_image = Comp.Image.fromBytes(final_image_bytes)
-                await event.send_message(result_image)
+                await event.send(MessageChain([result_image]))
                 # Return text summary to LLM
                 return "已成功为用户找到并发送了图片。"
             else:
